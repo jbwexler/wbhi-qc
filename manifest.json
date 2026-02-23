@@ -1,0 +1,27 @@
+{
+    "name": "wbhi-qc",
+    "label": "WBHI QC Gear",
+    "description": "Flywheel gear that aids in the quality control of the WBHI pipeline.",
+    "version": "0.1.0",
+    "author": "Joe Wexler",
+    "maintainer": "Joe Wexler",
+    "cite": "",
+    "license": "Apache-2.0",
+    "url": "https://github.com/jbwexler/wbhi-qc",
+    "source": "",
+    "environment": {
+        "FLYWHEEL": "/flywheel/v0",
+        "PWD": "/flywheel/v0",
+        "HOME": "/root",
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+        "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    },
+    "custom": {
+        "gear-builder": {"category": "analysis", "image": "jbwexler/wbhi-qc:0.1.0"},
+        "flywheel": {"suite": "WBHI"}
+    },
+    "inputs": {"key": {"base": "api-key"}},
+    "config": {},
+    "command": "python run.py"
+}
