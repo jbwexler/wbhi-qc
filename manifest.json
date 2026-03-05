@@ -21,7 +21,19 @@
         "gear-builder": {"category": "analysis", "image": "jbwexler/wbhi-qc:0.1.0"},
         "flywheel": {"suite": "WBHI"}
     },
-    "inputs": {"key": {"base": "api-key"}},
+    "inputs": {
+	"key": {"base": "api-key"},
+	"unique_csv": {
+            "description": "A 'unique' csv from a prior run that has been manually filled out.",
+	    "base": "file",
+	    "type": {
+                "enum": [
+		    "text"
+		]
+	    },
+	    "optional": true
+	}
+    },
     "config": {},
     "command": "python run.py"
 }

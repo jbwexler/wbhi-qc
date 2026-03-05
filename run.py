@@ -2,7 +2,7 @@
 
 import flywheel_gear_toolkit
 import flywheel
-from flywheel import ProjectOutput
+from flywheel import ProjectOutput, SessionListOutput
 import logging
 import pandas as pd
 from datetime import datetime
@@ -37,6 +37,32 @@ def create_view_df(
     return client.read_view_dataframe(view, container.id, opts={"dtype": column_dict})
 
 
+def mv_session(session: SessionListOutput, dst_project: ProjectOutput) -> None:
+    """Moves a session to another project."""
+    try:
+        session.update(project=dst_project.id)
+    except flywheel.ApiException as exc:
+        if exc.status == 422:
+            sub_label = client.get_subject(session.parents.subject).label.replace(
+                ',', r'\,'
+            )
+            subject_dst_id = dst_project.subjects.find_first(f'label="{sub_label}"').id
+            body = {
+                'sources': [session.id],
+                'destinations': [subject_dst_id],
+                'destination_container_type': 'subjects',
+                'conflict_mode': 'skip',
+            }
+            client.bulk_move_sessions(body=body)
+        else:
+            log.exception(
+                'Error moving subject %s from %s to %s',
+                session.subject.label,
+                session.id,
+                dst_project.label,
+            )
+            
+
 def bids_mosaic() -> None:
     """Creates a bids-mosaic pdf."""
     bids_path = gtk_context.download_project_bids(folders=['anat'])
@@ -54,7 +80,7 @@ def bids_mosaic() -> None:
         )
 
 
-def create_file_csv(project: ProjectOutput) -> None:
+def create_file_csv(project: ProjectOutput, dryrun=False) -> None:
     """Create a csv with information about each unique acquisition.label and
     bids.label pair."""
     columns = [
@@ -73,6 +99,8 @@ def create_file_csv(project: ProjectOutput) -> None:
             "file.created",
             "file.name",
             "acquisition.timestamp",
+            "session.id",
+            "subject.id",
     ]
     file_df = create_view_df(
         project,
@@ -81,13 +109,18 @@ def create_file_csv(project: ProjectOutput) -> None:
         filter="file.type=nifti",
     )
     
+    file_df.loc[:, "no_sub_bids_filename"] = file_df["file.info.BIDS.Filename"].fillna("").apply(lambda x: x.split('_', maxsplit=1)[1] if x else x)
+
+    if dryrun:
+        return file_df
+
     today = datetime.today().date().strftime("%Y%m%d")
     with gtk_context.open_output(f"wbhi-qc_{today}_all.csv", 'w') as f:
         file_df.to_csv(f)
 
-    file_df.loc[:, "no_sub_bids_filename"] = file_df["file.info.BIDS.Filename"].fillna("").apply(lambda x: x.split('_', maxsplit=1)[1] if x else x)
     unique_df = file_df.drop_duplicates(subset=["file.info.header.dicom.SeriesDescription", "no_sub_bids_filename"])
-    del unique_df["no_sub_bids_filename"]
+    unique_df.insert(0, "notes", "")
+    unique_df.insert(1, "action", "")
 
     with gtk_context.open_output(f"wbhi-qc_{today}_unique.csv", 'w') as f:
         unique_df.to_csv(f)
@@ -95,19 +128,80 @@ def create_file_csv(project: ProjectOutput) -> None:
     log.info("Successfully created csv")
 
 
+def process_csv_input(csv_input: str, all_df: pd.DataFrame, group_id: str) -> pd.DataFrame:
+    """Extrapolates "action" and "notes" columns to all rows in all_df."""
+    all_df = all_df.copy().fillna("")
+    csv_df = pd.read_csv(csv_input).fillna("")
+
+    csv_df["action"] = csv_df["action"].str.lower()
+
+    match_columns = ["file.info.header.dicom.SeriesDescription", "no_sub_bids_filename"]
+    merge_columns = match_columns + ["notes", "action"]
+
+    return all_df.merge(csv_df[merge_columns], on=match_columns, how="inner")
+
+
+def mv_good_subs(all_df: pd.DataFrame, group_id: str) -> None:
+    """Moves all subjects containing only "good" files from "staging" to "upload" project."""
+    sub_s = all_df.groupby("subject.id")["action"].apply(lambda x: "upload" if (x == "good").all() else "staging")
+
+    upload_project_path = f"{group_id}/upload"
+    upload_project = client.lookup(upload_project_path)
+    for sub_id in sub_s[sub_s == "upload"].index:
+        sub = client.get_subject(sub_id)
+        sessions = sub.sessions()
+
+        for ses in sessions:
+            log.info("Moving session %s/%s to %s." % (sub.label, ses.label, upload_project_path))
+            mv_session(ses, upload_project)
+
+    
+def rename_remove_files(all_df: pd.DataFrame, project: ProjectOutput) -> None:
+    """Add "_ignore-BIDS" suffix to all "remove" files."""
+    rm_df = all_df[all_df["action"] == "remove"]
+    acq_s = rm_df["acquisition.id"].drop_duplicates()
+
+    for acq_id in acq_s:
+        acq = client.get_acquisition(acq_id)
+        label = acq.label
+        new_label = f"{label}_ignore-BIDS"
+
+        log.info("Renaming acquisition %s from %s to %s" % (acq_id, label, new_label))
+        acq.update({"label": new_label})
+
+
+def create_fix_csv(all_df: pd.DataFrame) -> None:
+    """Creates a csv containing all files that need to be fixed."""
+    fix_df = all_df[all_df["action"] == "fix"]
+
+    today = datetime.today().date().strftime("%Y%m%d")
+    fix_csv_name = f"wbhi-qc_{today}_fix.csv"
+
+    log.info("Creating %s." % fix_csv_name)
+    with gtk_context.open_output(fix_csv_name, 'w') as f:
+        fix_df.to_csv(f)
 
 
 def main():
     gtk_context.init_logging()
     gtk_context.log_config()
 
-
     destination_id = gtk_context.destination["id"]
     project_id = client.get(destination_id)["parents"]["project"]
+    group_id = client.get(destination_id)["parents"]["group"]
     project = client.get_project(project_id)
 
-    bids_mosaic()
-    create_file_csv(project)
+    csv_input = gtk_context.get_input_path('unique_csv')
+    if csv_input:
+        all_df = create_file_csv(project, dryrun=True)
+        all_df = process_csv_input(csv_input, all_df, group_id)
+
+        mv_good_subs(all_df, group_id)
+        rename_remove_files(all_df, project)
+        create_fix_csv(all_df)
+    else:
+        create_file_csv(project)
+        bids_mosaic()
 
 
 if __name__ == "__main__":
