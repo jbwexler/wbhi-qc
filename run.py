@@ -44,31 +44,31 @@ def mv_session(session: SessionListOutput, dst_project: ProjectOutput) -> None:
     except flywheel.ApiException as exc:
         if exc.status == 422:
             sub_label = client.get_subject(session.parents.subject).label.replace(
-                ',', r'\,'
+                ",", r"\,"
             )
             subject_dst_id = dst_project.subjects.find_first(f'label="{sub_label}"').id
             body = {
-                'sources': [session.id],
-                'destinations': [subject_dst_id],
-                'destination_container_type': 'subjects',
-                'conflict_mode': 'skip',
+                "sources": [session.id],
+                "destinations": [subject_dst_id],
+                "destination_container_type": "subjects",
+                "conflict_mode": "skip",
             }
             client.bulk_move_sessions(body=body)
         else:
             log.exception(
-                'Error moving subject %s from %s to %s',
+                "Error moving subject %s from %s to %s",
                 session.subject.label,
                 session.id,
                 dst_project.label,
             )
-            
+
 
 def bids_mosaic() -> None:
     """Creates a bids-mosaic pdf."""
-    bids_path = gtk_context.download_project_bids(folders=['anat'])
+    bids_path = gtk_context.download_project_bids(folders=["anat"])
     today = datetime.today().date().strftime("%Y%m%d")
 
-    with gtk_context.open_output(f"wbhi-qc_{today}.pdf", 'wb') as f:
+    with gtk_context.open_output(f"wbhi-qc_{today}.pdf", "wb") as f:
         create_mosaic_pdf(
             bids_path,
             f,
@@ -84,23 +84,23 @@ def create_file_csv(project: ProjectOutput, dryrun=False) -> None:
     """Create a csv with information about each unique acquisition.label and
     bids.label pair."""
     columns = [
-            "file.info.header.dicom.SeriesDescription",
-            "file.info.BIDS.Filename",
-            "acquisition.label",
-            "subject.label",
-            "session.label",
-            "acquisition.id",
-            "file.info.header.dicom.ImageType",
-            "file.info.header.dicom_array.ImageType.0",
-            "file.classification.Intent",
-            "file.classification.Measurement",
-            "file.classification.Features",
-            "file.modality",
-            "file.created",
-            "file.name",
-            "acquisition.timestamp",
-            "session.id",
-            "subject.id",
+        "file.info.header.dicom.SeriesDescription",
+        "file.info.BIDS.Filename",
+        "acquisition.label",
+        "subject.label",
+        "session.label",
+        "acquisition.id",
+        "file.info.header.dicom.ImageType",
+        "file.info.header.dicom_array.ImageType.0",
+        "file.classification.Intent",
+        "file.classification.Measurement",
+        "file.classification.Features",
+        "file.modality",
+        "file.created",
+        "file.name",
+        "acquisition.timestamp",
+        "session.id",
+        "subject.id",
     ]
     file_df = create_view_df(
         project,
@@ -108,30 +108,38 @@ def create_file_csv(project: ProjectOutput, dryrun=False) -> None:
         client,
         filter="file.type=nifti",
     )
-    
+
     if file_df.empty:
         return file_df
 
-    file_df.loc[:, "no_sub_bids_filename"] = file_df["file.info.BIDS.Filename"].fillna("").apply(lambda x: x.split('_', maxsplit=1)[1] if x else x)
+    file_df.loc[:, "no_sub_bids_filename"] = (
+        file_df["file.info.BIDS.Filename"]
+        .fillna("")
+        .apply(lambda x: x.split("_", maxsplit=1)[1] if x else x)
+    )
 
     if dryrun:
         return file_df
 
     today = datetime.today().date().strftime("%Y%m%d")
-    with gtk_context.open_output(f"wbhi-qc_{today}_all.csv", 'w') as f:
+    with gtk_context.open_output(f"wbhi-qc_{today}_all.csv", "w") as f:
         file_df.to_csv(f)
 
-    unique_df = file_df.drop_duplicates(subset=["file.info.header.dicom.SeriesDescription", "no_sub_bids_filename"])
+    unique_df = file_df.drop_duplicates(
+        subset=["file.info.header.dicom.SeriesDescription", "no_sub_bids_filename"]
+    )
     unique_df.insert(0, "notes", "")
     unique_df.insert(1, "action", "")
 
-    with gtk_context.open_output(f"wbhi-qc_{today}_unique.csv", 'w') as f:
+    with gtk_context.open_output(f"wbhi-qc_{today}_unique.csv", "w") as f:
         unique_df.to_csv(f)
 
     log.info("Successfully created csv")
 
 
-def process_csv_input(csv_input: str, all_df: pd.DataFrame, group_id: str) -> pd.DataFrame:
+def process_csv_input(
+    csv_input: str, all_df: pd.DataFrame, group_id: str
+) -> pd.DataFrame:
     """Extrapolates "action" and "notes" columns to all rows in all_df."""
     all_df = all_df.copy().fillna("")
     csv_df = pd.read_csv(csv_input).fillna("")
@@ -148,7 +156,9 @@ def mv_untag_subs(all_df: pd.DataFrame, group_id: str) -> None:
     """Moves all subjects containing only "good" files from "staging" to "upload" project.
     The remaining sessions have their 'bidsified' tag removed."""
     all_df = all_df.copy()
-    sub_s = all_df.groupby("subject.id")["action"].apply(lambda x: "move" if (x == "good").all() else "untag")
+    sub_s = all_df.groupby("subject.id")["action"].apply(
+        lambda x: "move" if (x == "good").all() else "untag"
+    )
     upload_project_path = f"{group_id}/upload"
     upload_project = client.lookup(upload_project_path)
 
@@ -156,13 +166,19 @@ def mv_untag_subs(all_df: pd.DataFrame, group_id: str) -> None:
         sub = client.get_subject(sub_id)
         sessions = sub.sessions()
 
-        if sub_action == "move": 
+        if sub_action == "move":
             for ses in sessions:
                 if ses.project == upload_project.id:
-                    log.warning("Session %s/%s already in %s." % (sub.label, ses.label, upload_project_path))
+                    log.warning(
+                        "Session %s/%s already in %s."
+                        % (sub.label, ses.label, upload_project_path)
+                    )
                     continue
 
-                log.info("Moving session %s/%s to %s." % (sub.label, ses.label, upload_project_path))
+                log.info(
+                    "Moving session %s/%s to %s."
+                    % (sub.label, ses.label, upload_project_path)
+                )
                 mv_session(ses, upload_project)
         else:
             for ses in sessions:
@@ -173,7 +189,7 @@ def mv_untag_subs(all_df: pd.DataFrame, group_id: str) -> None:
                 log.info("Removing 'bidsified' tag for %s/%s" % (sub.label, ses.label))
                 ses.delete_tag("bidsified")
 
-    
+
 def rename_remove_files(all_df: pd.DataFrame, project: ProjectOutput) -> None:
     """Add "_ignore-BIDS" suffix to all "remove" files."""
     rm_df = all_df.copy()
@@ -185,7 +201,9 @@ def rename_remove_files(all_df: pd.DataFrame, project: ProjectOutput) -> None:
         label = acq.label
 
         if label.endswith("_ignore-BIDS"):
-            log.warning("Acquisition %s/%s already ends with '_ignore-BIDS'" % (acq_id, label))
+            log.warning(
+                "Acquisition %s/%s already ends with '_ignore-BIDS'" % (acq_id, label)
+            )
             continue
 
         new_label = f"{label}_ignore-BIDS"
@@ -205,7 +223,7 @@ def create_fix_csv(all_df: pd.DataFrame) -> None:
     fix_csv_name = f"wbhi-qc_{today}_fix.csv"
 
     log.info("Creating %s." % fix_csv_name)
-    with gtk_context.open_output(fix_csv_name, 'w') as f:
+    with gtk_context.open_output(fix_csv_name, "w") as f:
         fix_df.to_csv(f, index=False)
 
 
@@ -218,7 +236,7 @@ def main():
     group_id = client.get(destination_id)["parents"]["group"]
     project = client.get_project(project_id)
 
-    csv_input = gtk_context.get_input_path('unique_csv')
+    csv_input = gtk_context.get_input_path("unique_csv")
     if csv_input:
         all_df = create_file_csv(project, dryrun=True)
         all_df = process_csv_input(csv_input, all_df, group_id)
