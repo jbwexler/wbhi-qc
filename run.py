@@ -109,6 +109,9 @@ def create_file_csv(project: ProjectOutput, dryrun=False) -> None:
         filter="file.type=nifti",
     )
     
+    if file_df.empty:
+        return file_df
+
     file_df.loc[:, "no_sub_bids_filename"] = file_df["file.info.BIDS.Filename"].fillna("").apply(lambda x: x.split('_', maxsplit=1)[1] if x else x)
 
     if dryrun:
@@ -141,45 +144,69 @@ def process_csv_input(csv_input: str, all_df: pd.DataFrame, group_id: str) -> pd
     return all_df.merge(csv_df[merge_columns], on=match_columns, how="inner")
 
 
-def mv_good_subs(all_df: pd.DataFrame, group_id: str) -> None:
-    """Moves all subjects containing only "good" files from "staging" to "upload" project."""
-    sub_s = all_df.groupby("subject.id")["action"].apply(lambda x: "upload" if (x == "good").all() else "staging")
-
+def mv_untag_subs(all_df: pd.DataFrame, group_id: str) -> None:
+    """Moves all subjects containing only "good" files from "staging" to "upload" project.
+    The remaining sessions have their 'bidsified' tag removed."""
+    all_df = all_df.copy()
+    sub_s = all_df.groupby("subject.id")["action"].apply(lambda x: "move" if (x == "good").all() else "untag")
     upload_project_path = f"{group_id}/upload"
     upload_project = client.lookup(upload_project_path)
-    for sub_id in sub_s[sub_s == "upload"].index:
+
+    for sub_id, sub_action in sub_s.items():
         sub = client.get_subject(sub_id)
         sessions = sub.sessions()
 
-        for ses in sessions:
-            log.info("Moving session %s/%s to %s." % (sub.label, ses.label, upload_project_path))
-            mv_session(ses, upload_project)
+        if sub_action == "move": 
+            for ses in sessions:
+                if ses.project == upload_project.id:
+                    log.warning("Session %s/%s already in %s." % (sub.label, ses.label, upload_project_path))
+                    continue
+
+                log.info("Moving session %s/%s to %s." % (sub.label, ses.label, upload_project_path))
+                mv_session(ses, upload_project)
+        else:
+            for ses in sessions:
+                if "bidsified" not in ses.tags:
+                    log.warning("'bidsified' tag not in %s/%s" % (sub.label, ses.label))
+                    continue
+
+                log.info("Removing 'bidsified' tag for %s/%s" % (sub.label, ses.label))
+                ses.delete_tag("bidsified")
 
     
 def rename_remove_files(all_df: pd.DataFrame, project: ProjectOutput) -> None:
     """Add "_ignore-BIDS" suffix to all "remove" files."""
+    rm_df = all_df.copy()
     rm_df = all_df[all_df["action"] == "remove"]
     acq_s = rm_df["acquisition.id"].drop_duplicates()
 
     for acq_id in acq_s:
         acq = client.get_acquisition(acq_id)
         label = acq.label
-        new_label = f"{label}_ignore-BIDS"
 
+        if label.endswith("_ignore-BIDS"):
+            log.warning("Acquisition %s/%s already ends with '_ignore-BIDS'" % (acq_id, label))
+            continue
+
+        new_label = f"{label}_ignore-BIDS"
         log.info("Renaming acquisition %s from %s to %s" % (acq_id, label, new_label))
         acq.update({"label": new_label})
 
 
 def create_fix_csv(all_df: pd.DataFrame) -> None:
     """Creates a csv containing all files that need to be fixed."""
+    fix_df = all_df.copy()
     fix_df = all_df[all_df["action"] == "fix"]
+    notes_col = fix_df.pop("notes")
+    fix_df.insert(0, "notes", notes_col)
+    fix_df = fix_df.sort_values(["notes", "subject.label", "acquisition.timestamp"])
 
     today = datetime.today().date().strftime("%Y%m%d")
     fix_csv_name = f"wbhi-qc_{today}_fix.csv"
 
     log.info("Creating %s." % fix_csv_name)
     with gtk_context.open_output(fix_csv_name, 'w') as f:
-        fix_df.to_csv(f)
+        fix_df.to_csv(f, index=False)
 
 
 def main():
@@ -196,7 +223,7 @@ def main():
         all_df = create_file_csv(project, dryrun=True)
         all_df = process_csv_input(csv_input, all_df, group_id)
 
-        mv_good_subs(all_df, group_id)
+        mv_untag_subs(all_df, group_id)
         rename_remove_files(all_df, project)
         create_fix_csv(all_df)
     else:
