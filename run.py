@@ -134,6 +134,14 @@ def create_file_csv(project: ProjectOutput, dryrun=False) -> None:
     with gtk_context.open_output(f"wbhi-qc_{today}_unique.csv", "w") as f:
         unique_df.to_csv(f, index=False)
 
+    empty_bids_subs = (
+        file_df.groupby("subject.label")["file.info.BIDS.Filename"]
+        .apply(lambda x: x.fillna("").eq("").all())
+    )
+    empty_sub_labels = empty_bids_subs[empty_bids_subs].index.tolist()
+    if empty_sub_labels:
+        log.warning("Subjects with no BIDS filenames: %s" % empty_sub_labels)
+
     log.info("Successfully created csv")
 
 
