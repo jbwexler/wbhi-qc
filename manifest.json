@@ -32,8 +32,25 @@
 		]
 	    },
 	    "optional": true
+	},
+	"all_csv": {
+            "description": "An 'all' csv from a the same run as 'unique_csv'.",
+	    "base": "file",
+	    "type": {
+                "enum": [
+		    "text"
+		]
+	    },
+	    "optional": true
 	}
     },
-    "config": {},
+    "config": {
+        "mode": {
+            "description": "generate: scan project and produce QC CSVs and PDF. apply: process filled-out CSV inputs and apply actions. diff: compare filled-out CSV inputs against current project state.",
+            "type": "string",
+            "enum": ["generate", "apply", "diff"],
+            "default": "generate"
+        }
+    },
     "command": "python run.py"
 }
