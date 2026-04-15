@@ -69,7 +69,7 @@ def bids_mosaic() -> None:
     bids_path = gtk_context.download_project_bids(folders=["anat"])
     today = datetime.today().date().strftime("%Y%m%d")
 
-    with gtk_context.open_output(f"wbhi-qc_{today}.pdf", "wb") as f:
+    with gtk_context.open_output(f"wbhi-qc_{today}_mosaic.pdf", "wb") as f:
         create_mosaic_pdf(
             bids_path,
             f,
@@ -354,7 +354,8 @@ def main():
             create_fix_csv(all_input_df)
     else:
         create_file_csv(project)
-        bids_mosaic()
+        if config["mosaic"]:
+            bids_mosaic()
 
 
 if __name__ == "__main__":

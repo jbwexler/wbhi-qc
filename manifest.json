@@ -50,6 +50,11 @@
             "type": "string",
             "enum": ["generate", "apply", "diff"],
             "default": "generate"
+        },
+        "mosaic": {
+            "description": "Create a BIDS mosaic PDF. Only applies in generate mode.",
+            "type": "boolean",
+            "default": true
         }
     },
     "command": "python run.py"
