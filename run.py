@@ -87,6 +87,7 @@ def create_file_csv(project: ProjectOutput, dryrun=False) -> None:
     columns = [
         "file.info.header.dicom.SeriesDescription",
         "file.info.BIDS.Filename",
+        "file.info.BIDS.ignore",
         "acquisition.label",
         "subject.label",
         "session.label",
@@ -101,7 +102,7 @@ def create_file_csv(project: ProjectOutput, dryrun=False) -> None:
         "file.name",
         "acquisition.timestamp",
         "session.id",
-        "subject.label",
+        "subject.id",
     ]
     file_df = create_view_df(
         project,
@@ -111,6 +112,12 @@ def create_file_csv(project: ProjectOutput, dryrun=False) -> None:
 
     if file_df.empty:
         return file_df
+
+    file_df["file.info.BIDS.ignore"] = (
+        file_df["file.info.BIDS.ignore"].fillna(False).astype(bool)
+    )
+    file_df.loc[file_df["file.info.BIDS.ignore"], "file.info.BIDS.Filename"] = ""
+    file_df = file_df.drop(columns=["file.info.BIDS.ignore"])
 
     file_df.loc[:, "no_sub_bids_filename"] = (
         file_df["file.info.BIDS.Filename"]
@@ -134,9 +141,8 @@ def create_file_csv(project: ProjectOutput, dryrun=False) -> None:
     with gtk_context.open_output(f"wbhi-qc_{today}_unique.csv", "w") as f:
         unique_df.to_csv(f, index=False)
 
-    empty_bids_subs = (
-        file_df.groupby("subject.label")["file.info.BIDS.Filename"]
-        .apply(lambda x: x.fillna("").eq("").all())
+    empty_bids_subs = file_df.groupby("subject.label")["file.info.BIDS.Filename"].apply(
+        lambda x: x.fillna("").eq("").all()
     )
     empty_sub_labels = empty_bids_subs[empty_bids_subs].index.tolist()
     if empty_sub_labels:
@@ -170,7 +176,7 @@ def mv_untag_subs(all_df: pd.DataFrame, upload_project: ProjectOutput) -> None:
     """Moves all subjects containing only "good" files from "staging" to "upload" project.
     The remaining sessions have their 'bidsified' tag removed."""
     all_df = all_df.copy()
-    sub_s = all_df.groupby("subject.label")["action"].apply(
+    sub_s = all_df.groupby("subject.id")["action"].apply(
         lambda x: "move" if (x == "good").all() else "untag"
     )
 
@@ -224,6 +230,7 @@ def rename_remove_files(all_df: pd.DataFrame, project: ProjectOutput) -> None:
 
 def create_fix_csv(all_df: pd.DataFrame) -> None:
     """Creates a csv containing all files that need to be fixed."""
+    all_df = all_df.copy()
     fix_df = all_df[all_df["action"] == "fix"]
     notes_col = fix_df.pop("notes")
     fix_df.insert(0, "notes", notes_col)
@@ -272,7 +279,7 @@ def create_diff_csv(
 
     merged_df["change"] = merged_df.apply(get_change, axis=1)
 
-    all_good_subject_ids = set(
+    all_good_subject_labels = set(
         merged_df.groupby("subject.label").filter(
             lambda x: (x["action"].fillna("") == "good").all()
         )["subject.label"]
@@ -290,7 +297,7 @@ def create_diff_csv(
         if action == "good":
             expected = (
                 "moved_to_upload"
-                if row["subject.label"] in all_good_subject_ids
+                if row["subject.label"] in all_good_subject_labels
                 else "unchanged"
             )
         else:
