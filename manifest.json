@@ -2,7 +2,7 @@
     "name": "wbhi-qc",
     "label": "WBHI QC Gear",
     "description": "Flywheel gear that aids in the quality control of the WBHI pipeline.",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "author": "Joe Wexler",
     "maintainer": "Joe Wexler",
     "cite": "",
@@ -18,7 +18,7 @@
         "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
     },
     "custom": {
-        "gear-builder": {"category": "analysis", "image": "jbwexler/wbhi-qc:0.1.0"},
+        "gear-builder": {"category": "analysis", "image": "jbwexler/wbhi-qc:0.1.1"},
         "flywheel": {"suite": "WBHI"}
     },
     "inputs": {
