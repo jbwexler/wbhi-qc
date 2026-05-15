@@ -256,13 +256,21 @@ def create_diff_csv(
     input_acq_df = all_input_df.drop_duplicates(subset="acquisition.id").rename(
         columns={"acquisition.label": "acq_label_orig"}
     )
-    current_acq_df = (
-        all_current_df[["acquisition.id", "acquisition.label"]]
-        .drop_duplicates(subset="acquisition.id")
-        .rename(columns={"acquisition.label": "acq_label_current"})
+    current_acq_df = all_current_df.drop_duplicates(subset="acquisition.id").rename(
+        columns={"acquisition.label": "acq_label_current"}
     )
 
-    merged_df = input_acq_df.merge(current_acq_df, on="acquisition.id", how="outer")
+    merged_df = input_acq_df.merge(
+        current_acq_df, on="acquisition.id", how="outer", suffixes=("", "_current")
+    )
+
+    # For "new" rows (present only in current), input-side columns are NaN.
+    # Backfill them from the current-side duplicates, then drop the duplicates.
+    for col in current_acq_df.columns:
+        cur_col = f"{col}_current"
+        if cur_col in merged_df.columns:
+            merged_df[col] = merged_df[col].fillna(merged_df[cur_col])
+            merged_df = merged_df.drop(columns=[cur_col])
 
     def get_change(row):
         if pd.isna(row["acq_label_orig"]):
@@ -318,7 +326,7 @@ def create_diff_csv(
     ]
     remaining_cols = [c for c in merged_df.columns if c not in priority_cols]
     merged_df = merged_df[priority_cols + remaining_cols]
-    merged_df = merged_df.sort_values("error", ascending=False)
+    merged_df = merged_df.sort_values(["error", "subject.label"], ascending=False)
 
     today = datetime.today().date().strftime("%Y%m%d")
     diff_csv_name = f"wbhi-qc_{today}_diff.csv"
